@@ -1,50 +1,25 @@
 /**
- * @ Author: Ahmed EL  Qori
+ * @ Author: Ahmed EL Qori
  * @ Create Time: 2025-07-31 10:50:05
  * @ Modified by: Your name
- * @ Modified time: 2025-07-31 12:00:18
+ * @ Modified time: 2025-07-31 14:34:21
  * @ Description: Create Interceptor For request and response
  */
 public with sharing class OAuthService {
     public static String getAccessToken() {
-        EnvironmentSetting__mdt env = [
-            SELECT Id, client_id__c, client_secret__c, Api_URL__c 
-            FROM EnvironmentSetting__mdt
-            LIMIT 1
-        ];
+        HttpRequest                     req;
+        HttpResponse                    res;
+        Http                            http;
 
-        HttpRequest req = new HttpRequest();
-        req.setEndpoint(env.Api_URL__c);
-        req.setMethod('POST');
-        req.setHeader('Content-Type', 'application/json');
-        Map<String, Object> payload = new Map<String, Object>{
-            'clientId' => env.client_id__c,
-            'clientSecret' => env.client_secret__c
-        };
-        req.setBody(JSON.serialize(payload));
-        Http http = new Http();
-        HttpResponse res = http.send(req);
-
-        switch on res.getStatusCode()  {
-            when 200 {
-                Map<String, Object> tokenResponse = 
-                    (Map<String, Object>) JSON.deserializeUntyped(res.getBody());
-                return (String) tokenResponse.get('accessToken');
-            }
-            when 401 {
-                System.debug('Unauthorized: ' + res.getBody());
-                throw new CalloutException('Unauthorized access. Invalid credentials provided.');
-            }
-            when 422 {
-                System.debug('Validation Error: ' + res.getBody());
-                throw new CalloutException('Validation error. Missing or invalid input parameters.');
-            }
-            when else {
-                System.debug('Unexpected status code ' + res.getStatusCode() + ': ' + res.getBody());
-                throw new CalloutException('Unexpected response: ' + res.getBody());
-            }
-        }
+        req = new HttpRequest();
+        setupOAuth(req);
+        http = new Http();
+        res = http.send(req);
+        if (res.getStatusCode() == 200) return parseResponse(res);
+        generateErrorMessage(res.getStatusCode());
+        return null;
     }
+
     public static void authorizeRequest(HttpRequest req) {
         try {
             String token = getAccessToken();
@@ -53,37 +28,96 @@ public with sharing class OAuthService {
             System.debug(e);
         }
     }
-    public static HttpResponse EnhancedFetch(String method, String callout, String path, Map<String, String> headers, Map<String, Object> payload) {
+
+    public static HttpResponse EnhancedFetch(String method, String callout,
+            String path, Map<String, String> headers, Map<String, Object> payload) {
         try {
-            HttpRequest req = new HttpRequest();
-            String endpoint = callout;
-            if (String.isNotBlank(path)) {
-                endpoint += (callout.endsWith('/') || path.startsWith('/')) ? path : '/' + path;
-            }
-            req.setEndpoint(endpoint);
-            req.setMethod(method.toUpperCase());
-            if (headers == null || !headers.containsKey('Content-Type')) {
-                req.setHeader('Content-Type', 'application/json');
-            }
-            if (headers != null && !headers.isEmpty()) {
-                for (String headerKey : headers.keySet()) {
-                    req.setHeader(headerKey, headers.get(headerKey));
-                }
-            }
+            HttpResponse    res;
+            HttpRequest     req;
+            Http            http;
+            
+            req = new HttpRequest();
+            setEndPoint(req, callout, path);
+            setMethod(req, method);
+            setContentType(req, headers);
+            setHeaders(req, headers);
             authorizeRequest(req);
-            if (payload != null && !payload.isEmpty() && 
-                (method.equalsIgnoreCase('POST') || method.equalsIgnoreCase('PUT') || method.equalsIgnoreCase('PATCH'))) {
-                req.setBody(JSON.serialize(payload));
-            }
+            setBody(req, payload, method);
             req.setTimeout(120000);
-            Http http = new Http();
-            HttpResponse res = http.send(req);
+            http = new Http();
+            res = http.send(req);
             return res;
         } catch (Exception e) {
             System.debug('EnhancedFetch Error: ' + e.getMessage());
-            System.debug('Stack Trace: ' + e.getStackTraceString());
             throw new CalloutException('HTTP Request failed: ' + e.getMessage());
         }
+    }
+
+    private static void setupOAuth(HttpRequest req)
+    {
+        List<EnvironmentSetting__mdt>   env;
+        Map<String, Object>             payload;
+
+        env = EnvironmentSetting__mdt.getAll().values();
+        payload = new Map<String, Object>{
+            'clientId' => env[0].client_id__c,
+            'clientSecret' => env[0].client_secret__c
+        };
+        req.setEndpoint(env[0].Api_URL__c);
+        req.setMethod('POST');
+        req.setHeader('Content-Type', 'application/json');
+        req.setBody(JSON.serialize(payload));
+    } 
+
+    private static void setEndPoint(HttpRequest req, String callout, String path)
+    {
+        String  endpoint;
+
+        endpoint = callout;
+        if (String.isNotBlank(path))
+            endpoint += (callout.endsWith('/') || path.startsWith('/')) ? path : '/' + path;
+        req.setEndpoint(endpoint);
+    }
+
+    private static void setMethod(HttpRequest req, String method)
+    {
+        req.setMethod(method.toUpperCase());
+    }
+    
+    private static void setContentType(HttpRequest req, Map<String, String> headers)
+    {
+        if (headers == null || !headers.containsKey('Content-Type'))
+            req.setHeader('Content-Type', 'application/json');
+    }
+
+    private static void setHeaders(HttpRequest req, Map<String, String> headers)
+    {
+        if (headers != null && !headers.isEmpty()) {
+            for (String headerKey : headers.keySet()) {
+                req.setHeader(headerKey, headers.get(headerKey));
+            }
+        }
+    }
+
+    private static void setBody(HttpRequest req, Map<String, Object> payload, String method)
+    {
+        if (payload != null && !payload.isEmpty() && 
+            (method.equalsIgnoreCase('POST') || method.equalsIgnoreCase('PUT') || method.equalsIgnoreCase('PATCH'))) {
+            req.setBody(JSON.serialize(payload));
+        }
+    }
+
+    private static String parseResponse(HttpResponse res)
+    {
+        return  (String) (((Map<String, Object>) JSON.deserializeUntyped(res.getBody())).get('accessToken'));
+    }
+
+    private static void generateErrorMessage(Integer statusCode) {
+        if (statusCode == 401)
+            throw new CalloutException('Unauthorized access. Invalid credentials provided.');
+        if (statusCode == 422)
+            throw new CalloutException('Validation error. Missing or invalid input parameters.');
+        throw new CalloutException('Unexpected response with status code: ' + statusCode);
     }
 }
 
