@@ -1,13 +1,15 @@
 /**
- * @ Author: Ahmed EL Qori
- * @ Create Time: 2025-07-31 10:50:05
- * @ Modified by: Your name
- * @ Modified time: 2025-07-31 14:34:21
- * @ Description: Create Interceptor For request and response
- */
+ * @description       : Create Interceptor for request and response
+ * @author            : ChangeMeIn@UserSettingsUnder.SFDoc
+ * @group             : 
+ * @last modified on  : 07-31-2025
+ * @last modified by  : ChangeMeIn@UserSettingsUnder.SFDoc
+**/
+
 public with sharing class OAuthService {
     public static String getAccessToken() {
         HttpRequest                     req;
+
         HttpResponse                    res;
         Http                            http;
 
